@@ -25,6 +25,7 @@ import TransactionModal from './components/TransactionModal'
 import BudgetModal from './components/BudgetModal'
 import ImportModal from './components/ImportModal'
 import AuthModal from './components/AuthModal'
+import AdminDashboard from './components/AdminDashboard'
 
 import {
   loadTransactions,
@@ -40,6 +41,9 @@ import { DEFAULT_BUDGET } from './constants'
 
 export default function App() {
   const [currentMonth, setCurrentMonth] = useState(() => getMonthKey())
+
+  // View mode: 'app' (Giao diện chính sổ chi tiêu) | 'admin' (Dashboard Quản trị Admin)
+  const [viewMode, setViewMode] = useState('app')
 
   // Authentication state
   const [currentUser, setCurrentUser] = useState(() => getCurrentUser())
@@ -80,6 +84,13 @@ export default function App() {
     setBudgets(bds)
   }, [currentUser])
 
+  // If viewMode is admin but user is no longer admin, redirect back to app
+  useEffect(() => {
+    if (viewMode === 'admin' && currentUser?.role !== 'admin') {
+      setViewMode('app')
+    }
+  }, [viewMode, currentUser])
+
   const monthTransactions = transactions.filter(t => t.date && t.date.startsWith(currentMonth))
 
   const currentBudget = budgets[currentMonth] || DEFAULT_BUDGET
@@ -98,12 +109,13 @@ export default function App() {
   // Handlers for Auth
   const handleAuthSuccess = (user) => {
     setCurrentUser(user)
-    showToast(`Xin chào ${user.name || user.username}!`)
+    showToast(`Xin chào ${user.fullName || user.username}!`)
   }
 
   const handleLogout = () => {
     logoutUser()
     setCurrentUser(null)
+    setViewMode('app')
     showToast('Đã đăng xuất tài khoản')
   }
 
@@ -185,6 +197,26 @@ export default function App() {
     })
   }
 
+  // RENDER: Nếu đang ở chế độ Quản Trị Admin
+  if (viewMode === 'admin' && currentUser?.role === 'admin') {
+    return (
+      <>
+        <AdminDashboard
+          currentUser={currentUser}
+          onBackToApp={() => setViewMode('app')}
+          showToast={showToast}
+        />
+        {toast && (
+          <div className="fixed bottom-6 left-6 z-50 bg-slate-800 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 animate-fade-in border border-slate-700 text-sm">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{toast.message}</span>
+          </div>
+        )}
+      </>
+    )
+  }
+
+  // RENDER: Giao diện chính Sổ Chi Tiêu Hàng Ngày
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col selection:bg-indigo-500 selection:text-white">
       <Header
@@ -199,6 +231,7 @@ export default function App() {
         currentUser={currentUser}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onLogout={handleLogout}
+        onOpenAdminDashboard={() => setViewMode('admin')}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">

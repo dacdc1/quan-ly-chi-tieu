@@ -1,5 +1,5 @@
 import emailjs from '@emailjs/browser'
-import { EMAIL_CONFIG, isEmailConfigured } from '../constants/emailConfig'
+import { getEmailConfig, isEmailConfigured } from '../constants/emailConfig'
 
 const SENT_EMAILS_KEY = 'quanlychitieu_sent_emails_v1'
 
@@ -16,14 +16,23 @@ export function getSentEmails() {
 }
 
 /**
+ * Clear sent emails history
+ */
+export function clearSentEmails() {
+  try {
+    localStorage.removeItem(SENT_EMAILS_KEY)
+    window.dispatchEvent(new CustomEvent('quanlychitieu_new_email'))
+  } catch (e) {}
+}
+
+/**
  * Save an outgoing email to local mailbox history
  */
 function recordSentEmail(emailRecord) {
   try {
     const list = getSentEmails()
-    const updated = [emailRecord, ...list].slice(0, 30) // keep last 30
+    const updated = [emailRecord, ...list].slice(0, 50) // keep last 50
     localStorage.setItem(SENT_EMAILS_KEY, JSON.stringify(updated))
-    // Trigger custom event for real-time notification
     window.dispatchEvent(new CustomEvent('quanlychitieu_new_email', { detail: emailRecord }))
   } catch (e) {
     console.error('Error recording sent email:', e)
@@ -47,19 +56,19 @@ export async function sendRegistrationEmail({ to_email, to_name, username }) {
 
   recordSentEmail(emailRecord)
 
-  // Nếu đã cấu hình EmailJS, gửi mail thật trực tiếp tới hộp thư người dùng
-  if (isEmailConfigured() && EMAIL_CONFIG.WELCOME_TEMPLATE_ID) {
+  const config = getEmailConfig()
+  if (isEmailConfigured() && config.WELCOME_TEMPLATE_ID) {
     try {
       await emailjs.send(
-        EMAIL_CONFIG.SERVICE_ID,
-        EMAIL_CONFIG.WELCOME_TEMPLATE_ID,
+        config.SERVICE_ID,
+        config.WELCOME_TEMPLATE_ID,
         {
           to_name,
           to_email,
           username,
           message: emailRecord.body
         },
-        EMAIL_CONFIG.PUBLIC_KEY
+        config.PUBLIC_KEY
       )
     } catch (err) {
       console.warn('EmailJS error (email is recorded in local mailbox):', err)
@@ -86,19 +95,19 @@ export async function sendOtpEmail({ to_email, to_name, otp }) {
 
   recordSentEmail(emailRecord)
 
-  // Nếu đã cấu hình EmailJS, gửi email thật
-  if (isEmailConfigured() && EMAIL_CONFIG.OTP_TEMPLATE_ID) {
+  const config = getEmailConfig()
+  if (isEmailConfigured() && config.OTP_TEMPLATE_ID) {
     try {
       await emailjs.send(
-        EMAIL_CONFIG.SERVICE_ID,
-        EMAIL_CONFIG.OTP_TEMPLATE_ID,
+        config.SERVICE_ID,
+        config.OTP_TEMPLATE_ID,
         {
           to_name,
           to_email,
           otp_code: otp,
           message: emailRecord.body
         },
-        EMAIL_CONFIG.PUBLIC_KEY
+        config.PUBLIC_KEY
       )
     } catch (err) {
       console.warn('EmailJS error (email is recorded in local mailbox):', err)
