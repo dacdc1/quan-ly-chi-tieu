@@ -1,5 +1,8 @@
+import { sendRegistrationEmail, sendOtpEmail } from './emailService'
+
 const USERS_STORAGE_KEY = 'quanlychitieu_users_v1'
 const SESSION_STORAGE_KEY = 'quanlychitieu_session_v1'
+const OTP_STORAGE_KEY = 'quanlychitieu_password_reset_otp_v1'
 
 /**
  * Hash password using Web Crypto API SHA-256
@@ -12,7 +15,6 @@ async function hashPassword(str) {
     const hashArray = Array.from(new Uint8Array(hashBuffer))
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
   } catch (e) {
-    // Fallback simple hash if subtle is unavailable in older contexts
     let hash = 0
     for (let i = 0; i < str.length; i++) {
       hash = (hash << 5) - hash + str.charCodeAt(i)
@@ -30,12 +32,12 @@ export function getAllUsers() {
     if (typeof window === 'undefined' || !window.localStorage) return []
     const raw = localStorage.getItem(USERS_STORAGE_KEY)
     if (!raw) {
-      // Seed a default demo account for convenience
       const defaultUsers = [
         {
           id: 'user_demo',
+          fullName: 'Tài Khoản Demo',
           username: 'demo',
-          name: 'Tài khoản Demo',
+          email: 'demo@quanlychitieu.vn',
           passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', // '123456'
           createdAt: new Date().toISOString()
         }
@@ -50,9 +52,6 @@ export function getAllUsers() {
   }
 }
 
-/**
- * Save users list to localStorage
- */
 function saveAllUsers(users) {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return
@@ -62,9 +61,6 @@ function saveAllUsers(users) {
   }
 }
 
-/**
- * Get currently logged-in user session
- */
 export function getCurrentUser() {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return null
@@ -72,14 +68,10 @@ export function getCurrentUser() {
     if (!raw) return null
     return JSON.parse(raw)
   } catch (err) {
-    console.error('Error getting session:', err)
     return null
   }
 }
 
-/**
- * Save current session
- */
 export function setCurrentUser(user) {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return
@@ -94,14 +86,25 @@ export function setCurrentUser(user) {
 }
 
 /**
- * Register a new user
+ * Đăng ký tài khoản đầy đủ: Họ tên, Username, Email, Mật khẩu
  */
-export async function registerUser({ username, name, password }) {
+export async function registerUser({ fullName, username, email, password }) {
+  const cleanFullName = (fullName || '').trim()
   const cleanUsername = (username || '').trim().toLowerCase()
-  const cleanName = (name || '').trim() || cleanUsername
+  const cleanEmail = (email || '').trim().toLowerCase()
+
+  if (!cleanFullName || cleanFullName.length < 2) {
+    throw new Error('Vui lòng nhập Họ và tên đầy đủ')
+  }
 
   if (!cleanUsername || cleanUsername.length < 3) {
-    throw new Error('Tên đăng nhập phải có ít nhất 3 ký tự')
+    throw new Error('Tên đăng nhập (Username) phải có ít nhất 3 ký tự')
+  }
+
+  // Email regex validation
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+    throw new Error('Địa chỉ email không đúng định dạng (VD: example@gmail.com)')
   }
 
   if (!password || password.length < 6) {
@@ -109,16 +112,25 @@ export async function registerUser({ username, name, password }) {
   }
 
   const users = getAllUsers()
-  const exists = users.find(u => u.username.toLowerCase() === cleanUsername)
-  if (exists) {
+  
+  // Check unique username
+  const existsUsername = users.find(u => u.username.toLowerCase() === cleanUsername)
+  if (existsUsername) {
     throw new Error('Tên đăng nhập này đã được sử dụng. Vui lòng chọn tên khác.')
+  }
+
+  // Check unique email
+  const existsEmail = users.find(u => (u.email || '').toLowerCase() === cleanEmail)
+  if (existsEmail) {
+    throw new Error('Email này đã được đăng ký tài khoản trước đó.')
   }
 
   const pHash = await hashPassword(password)
   const newUser = {
     id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    fullName: cleanFullName,
     username: cleanUsername,
-    name: cleanName,
+    email: cleanEmail,
     passwordHash: pHash,
     createdAt: new Date().toISOString()
   }
@@ -126,11 +138,20 @@ export async function registerUser({ username, name, password }) {
   users.push(newUser)
   saveAllUsers(users)
 
-  // Auto login session (omit sensitive passwordHash from session)
+  // Gửi thư chào mừng thông báo đăng ký về email người dùng
+  await sendRegistrationEmail({
+    to_email: cleanEmail,
+    to_name: cleanFullName,
+    username: cleanUsername
+  })
+
+  // Auto login session
   const sessionUser = {
     id: newUser.id,
+    fullName: newUser.fullName,
+    name: newUser.fullName,
     username: newUser.username,
-    name: newUser.name,
+    email: newUser.email,
     createdAt: newUser.createdAt
   }
   setCurrentUser(sessionUser)
@@ -139,25 +160,26 @@ export async function registerUser({ username, name, password }) {
 }
 
 /**
- * Login an existing user
+ * Đăng nhập (hỗ trợ nhập Username hoặc Email)
  */
-export async function loginUser({ username, password }) {
-  const cleanUsername = (username || '').trim().toLowerCase()
+export async function loginUser({ usernameOrEmail, password }) {
+  const cleanKey = (usernameOrEmail || '').trim().toLowerCase()
 
-  if (!cleanUsername || !password) {
-    throw new Error('Vui lòng nhập tên đăng nhập và mật khẩu')
+  if (!cleanKey || !password) {
+    throw new Error('Vui lòng nhập tài khoản/email và mật khẩu')
   }
 
   const users = getAllUsers()
-  const user = users.find(u => u.username.toLowerCase() === cleanUsername)
+  const user = users.find(
+    u => u.username.toLowerCase() === cleanKey || (u.email && u.email.toLowerCase() === cleanKey)
+  )
 
   if (!user) {
-    throw new Error('Tài khoản không tồn tại. Vui lòng kiểm tra lại hoặc Đăng ký.')
+    throw new Error('Tài khoản hoặc email không tồn tại trên hệ thống.')
   }
 
   const pHash = await hashPassword(password)
-  // Accept standard hash or default demo bypass for '123456'
-  const isMatch = (user.passwordHash === pHash) || (cleanUsername === 'demo' && password === '123456')
+  const isMatch = (user.passwordHash === pHash) || (cleanKey === 'demo' && password === '123456')
 
   if (!isMatch) {
     throw new Error('Mật khẩu không chính xác')
@@ -165,8 +187,10 @@ export async function loginUser({ username, password }) {
 
   const sessionUser = {
     id: user.id,
+    fullName: user.fullName || user.name || user.username,
+    name: user.fullName || user.name || user.username,
     username: user.username,
-    name: user.name,
+    email: user.email,
     createdAt: user.createdAt
   }
   setCurrentUser(sessionUser)
@@ -174,43 +198,108 @@ export async function loginUser({ username, password }) {
   return sessionUser
 }
 
-/**
- * Logout current user
- */
 export function logoutUser() {
   setCurrentUser(null)
 }
 
 /**
- * Update user profile
+ * YÊU CẦU QUÊN MẬT KHẨU: Tạo & Gửi mã OTP 6 số về email
  */
-export async function updateUserProfile(userId, { name, newPassword }) {
+export async function requestPasswordResetOtp(email) {
+  const cleanEmail = (email || '').trim().toLowerCase()
+  if (!cleanEmail) {
+    throw new Error('Vui lòng nhập địa chỉ email đã đăng ký')
+  }
+
   const users = getAllUsers()
-  const idx = users.findIndex(u => u.id === userId)
+  const user = users.find(u => (u.email || '').toLowerCase() === cleanEmail)
+
+  if (!user) {
+    throw new Error(`Không tìm thấy tài khoản nào gắn với email: ${cleanEmail}`)
+  }
+
+  // Sinh mã OTP 6 số ngẫu nhiên
+  const otp = String(Math.floor(100000 + Math.random() * 900000))
+  const expiresAt = Date.now() + 5 * 60 * 1000 // hiệu lực 5 phút
+
+  // Lưu OTP vào bộ nhớ tạm
+  localStorage.setItem(
+    OTP_STORAGE_KEY,
+    JSON.stringify({
+      email: cleanEmail,
+      otp,
+      expiresAt
+    })
+  )
+
+  // Gửi OTP về email
+  const emailResult = await sendOtpEmail({
+    to_email: cleanEmail,
+    to_name: user.fullName || user.username,
+    otp
+  })
+
+  return {
+    success: true,
+    email: cleanEmail,
+    userName: user.fullName || user.username,
+    emailRecord: emailResult
+  }
+}
+
+/**
+ * XÁC THỰC MÃ OTP
+ */
+export function verifyPasswordResetOtp(email, enteredOtp) {
+  const cleanEmail = (email || '').trim().toLowerCase()
+  const cleanOtp = (enteredOtp || '').trim()
+
+  const raw = localStorage.getItem(OTP_STORAGE_KEY)
+  if (!raw) {
+    throw new Error('Mã OTP không tồn tại hoặc đã hết hạn. Vui lòng yêu cầu lại.')
+  }
+
+  const data = JSON.parse(raw)
+  if (data.email !== cleanEmail) {
+    throw new Error('Email không khớp với yêu cầu OTP.')
+  }
+
+  if (Date.now() > data.expiresAt) {
+    localStorage.removeItem(OTP_STORAGE_KEY)
+    throw new Error('Mã OTP đã hết hiệu lực (quá 5 phút). Vui lòng bấm gửi lại mã.')
+  }
+
+  if (data.otp !== cleanOtp) {
+    throw new Error('Mã OTP không chính xác. Vui lòng kiểm tra lại trong email.')
+  }
+
+  return true
+}
+
+/**
+ * ĐẶT LẠI MẬT KHẨU MỚI SAU KHI XÁC THỰC OTP THÀNH CÔNG
+ */
+export async function resetPasswordWithOtp(email, otp, newPassword) {
+  verifyPasswordResetOtp(email, otp)
+
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự')
+  }
+
+  const cleanEmail = (email || '').trim().toLowerCase()
+  const users = getAllUsers()
+  const idx = users.findIndex(u => (u.email || '').toLowerCase() === cleanEmail)
+
   if (idx === -1) {
     throw new Error('Không tìm thấy tài khoản người dùng')
   }
 
-  if (name && name.trim()) {
-    users[idx].name = name.trim()
-  }
-
-  if (newPassword) {
-    if (newPassword.length < 6) {
-      throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự')
-    }
-    users[idx].passwordHash = await hashPassword(newPassword)
-  }
-
+  const pHash = await hashPassword(newPassword)
+  users[idx].passwordHash = pHash
   saveAllUsers(users)
 
-  const updatedSession = {
-    id: users[idx].id,
-    username: users[idx].username,
-    name: users[idx].name,
-    createdAt: users[idx].createdAt
-  }
-  setCurrentUser(updatedSession)
+  // Hủy mã OTP đã dùng
+  localStorage.removeItem(OTP_STORAGE_KEY)
 
-  return updatedSession
+  return users[idx]
 }
