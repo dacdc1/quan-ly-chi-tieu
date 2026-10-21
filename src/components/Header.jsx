@@ -10,7 +10,11 @@ import {
   Wallet,
   FileSpreadsheet,
   FileJson,
-  RotateCcw
+  RotateCcw,
+  User,
+  LogIn,
+  LogOut,
+  ShieldCheck
 } from 'lucide-react'
 
 export default function Header({
@@ -21,20 +25,28 @@ export default function Header({
   onExportCSV,
   onExportJSON,
   onOpenImportModal,
-  onResetData
+  onResetData,
+  currentUser,
+  onOpenAuthModal,
+  onLogout
 }) {
   const [showExportMenu, setShowExportMenu] = useState(false)
+  const [showUserMenu, setShowUserMenu] = useState(false)
   const menuRef = useRef(null)
+  const userMenuRef = useRef(null)
 
   const [yearStr, monthStr] = currentMonth.split('-')
   const year = parseInt(yearStr, 10)
   const month = parseInt(monthStr, 10)
 
-  // Handle outside click to close export dropdown
+  // Handle outside click to close dropdowns
   useEffect(() => {
     function handleClickOutside(event) {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
         setShowExportMenu(false)
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setShowUserMenu(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -91,13 +103,30 @@ export default function Header({
             </div>
 
             {/* Quick action button for mobile */}
-            <button
-              onClick={() => onOpenAddModal()}
-              className="sm:hidden p-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition"
-              title="Thêm giao dịch"
-            >
-              <Plus className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2 sm:hidden">
+              {currentUser ? (
+                <button
+                  onClick={() => setShowUserMenu(!showUserMenu)}
+                  className="w-8 h-8 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center"
+                >
+                  {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+                </button>
+              ) : (
+                <button
+                  onClick={onOpenAuthModal}
+                  className="p-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-semibold flex items-center gap-1"
+                >
+                  <LogIn className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                onClick={() => onOpenAddModal()}
+                className="p-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition"
+                title="Thêm giao dịch"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Month Selector */}
@@ -199,7 +228,7 @@ export default function Header({
                   <button
                     onClick={() => {
                       setShowExportMenu(false)
-                      if (window.confirm('Bạn có chắc muốn xóa sạch toàn bộ chi tiêu tháng này để tự điền lại từ đầu?')) {
+                      if (window.confirm(`Bạn có chắc muốn xóa sạch toàn bộ chi tiêu tháng ${month} để tự điền lại từ đầu?`)) {
                         onResetData()
                       }
                     }}
@@ -209,6 +238,53 @@ export default function Header({
                     <span>Xóa sạch tháng {month} (để tự điền)</span>
                   </button>
                 </div>
+              )}
+            </div>
+
+            {/* User Profile / Login Button */}
+            <div className="relative" ref={userMenuRef}>
+              {currentUser ? (
+                <div>
+                  <button
+                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    className="inline-flex items-center gap-2 px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition border border-slate-200"
+                    title="Tài khoản cá nhân"
+                  >
+                    <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white font-bold flex items-center justify-center text-xs shadow-xs">
+                      {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                    <span className="hidden sm:inline max-w-[100px] truncate">{currentUser.name || currentUser.username}</span>
+                  </button>
+
+                  {showUserMenu && (
+                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 animate-fade-in text-sm">
+                      <div className="px-4 py-2 border-b border-slate-100">
+                        <div className="text-xs font-bold text-slate-900 truncate">{currentUser.name}</div>
+                        <div className="text-[11px] text-slate-400">@{currentUser.username}</div>
+                      </div>
+                      <div className="p-1">
+                        <button
+                          onClick={() => {
+                            setShowUserMenu(false)
+                            onLogout()
+                          }}
+                          className="w-full text-left px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl flex items-center gap-2 text-xs font-semibold transition"
+                        >
+                          <LogOut className="w-3.5 h-3.5" />
+                          <span>Đăng xuất</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={onOpenAuthModal}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition shadow-xs"
+                >
+                  <LogIn className="w-4 h-4 text-indigo-600" />
+                  <span>Đăng Nhập</span>
+                </button>
               )}
             </div>
 

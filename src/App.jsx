@@ -24,6 +24,7 @@ import TransactionList from './components/TransactionList'
 import TransactionModal from './components/TransactionModal'
 import BudgetModal from './components/BudgetModal'
 import ImportModal from './components/ImportModal'
+import AuthModal from './components/AuthModal'
 
 import {
   loadTransactions,
@@ -32,24 +33,28 @@ import {
   saveBudgets,
   clearMonthTransactions
 } from './utils/storage'
+import { getCurrentUser, logoutUser } from './utils/auth'
 import { exportToCSV, exportToJSON } from './utils/exportImport'
 import { getMonthKey, formatDateKey, getDaysInMonth, formatCurrency } from './utils/formatters'
 import { DEFAULT_BUDGET } from './constants'
 
 export default function App() {
   const [currentMonth, setCurrentMonth] = useState(() => getMonthKey())
-  const [transactions, setTransactions] = useState(() => loadTransactions())
-  const [budgets, setBudgets] = useState(() => loadBudgets())
 
-  // Core navigation tab: 'daily' (Nhật ký hàng ngày) | 'analytics' (Báo cáo biểu đồ) | 'all_tx' (Sổ giao dịch)
+  // Authentication state
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUser())
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
+
+  // Transactions & Budgets scoped to current user
+  const [transactions, setTransactions] = useState(() => loadTransactions(currentUser?.id))
+  const [budgets, setBudgets] = useState(() => loadBudgets(currentUser?.id))
+
   const [activeTab, setActiveTab] = useState('daily')
 
-  // Selected date defaults to Today
   const todayStr = formatDateKey(new Date())
   const [selectedDate, setSelectedDate] = useState(todayStr)
   const [selectedCategory, setSelectedCategory] = useState(null)
 
-  // Modals state
   const [txModal, setTxModal] = useState({
     isOpen: false,
     initialData: null,
@@ -58,7 +63,6 @@ export default function App() {
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false)
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
 
-  // Toast notification
   const [toast, setToast] = useState(null)
 
   const showToast = (message, type = 'success') => {
@@ -68,16 +72,21 @@ export default function App() {
     }, 3200)
   }
 
-  // Filter transactions belonging to currentMonth
+  // Reload transactions and budgets whenever user session changes
+  useEffect(() => {
+    const txs = loadTransactions(currentUser?.id)
+    const bds = loadBudgets(currentUser?.id)
+    setTransactions(txs)
+    setBudgets(bds)
+  }, [currentUser])
+
   const monthTransactions = transactions.filter(t => t.date && t.date.startsWith(currentMonth))
 
-  // Budget for current month
   const currentBudget = budgets[currentMonth] || DEFAULT_BUDGET
   const [yearStr, monthStr] = currentMonth.split('-')
   const daysInMonth = getDaysInMonth(parseInt(yearStr, 10), parseInt(monthStr, 10))
   const dailyBudgetLimit = Math.round((currentBudget.monthlyLimit || 10000000) / daysInMonth)
 
-  // Expenses summary
   const totalExpense = monthTransactions
     .filter(t => t.type === 'expense')
     .reduce((sum, t) => sum + Number(t.amount || 0), 0)
@@ -85,6 +94,18 @@ export default function App() {
   const todayExpense = monthTransactions
     .filter(t => t.date === todayStr && t.type === 'expense')
     .reduce((sum, t) => sum + Number(t.amount || 0), 0)
+
+  // Handlers for Auth
+  const handleAuthSuccess = (user) => {
+    setCurrentUser(user)
+    showToast(`Xin chào ${user.name || user.username}!`)
+  }
+
+  const handleLogout = () => {
+    logoutUser()
+    setCurrentUser(null)
+    showToast('Đã đăng xuất tài khoản')
+  }
 
   // Handlers for Transactions
   const handleSaveTransaction = (transactionData) => {
@@ -99,28 +120,26 @@ export default function App() {
       showToast('Đã lưu khoản chi tiêu!')
     }
     setTransactions(updated)
-    saveTransactions(updated)
+    saveTransactions(updated, currentUser?.id)
   }
 
   const handleDeleteTransaction = (id) => {
     const updated = transactions.filter(t => t.id !== id)
     setTransactions(updated)
-    saveTransactions(updated)
+    saveTransactions(updated, currentUser?.id)
     showToast('Đã xóa giao dịch!')
   }
 
-  // Handlers for Budget
   const handleSaveBudget = (newBudget) => {
     const updated = {
       ...budgets,
       [currentMonth]: newBudget
     }
     setBudgets(updated)
-    saveBudgets(updated)
+    saveBudgets(updated, currentUser?.id)
     showToast('Đã cập nhật hạn mức ngân sách!')
   }
 
-  // Handlers for Export / Import
   const handleExportCSV = () => {
     exportToCSV(monthTransactions, currentMonth)
     showToast('Đã xuất file Excel (CSV)!')
@@ -134,24 +153,22 @@ export default function App() {
   const handleImportSuccess = (importedData) => {
     if (importedData.transactions) {
       setTransactions(importedData.transactions)
-      saveTransactions(importedData.transactions)
+      saveTransactions(importedData.transactions, currentUser?.id)
     }
     if (importedData.budgets) {
       setBudgets(importedData.budgets)
-      saveBudgets(importedData.budgets)
+      saveBudgets(importedData.budgets, currentUser?.id)
     }
     showToast('Khôi phục dữ liệu thành công!')
   }
 
-  // Reset / Clear month data as user requested
   const handleResetData = () => {
-    const remaining = clearMonthTransactions(currentMonth)
+    const remaining = clearMonthTransactions(currentMonth, currentUser?.id)
     setTransactions(remaining)
     setSelectedCategory(null)
     showToast(`Đã làm trống toàn bộ tháng ${monthStr} để bạn tự điền!`)
   }
 
-  // Open Add modal with optional specific date
   const handleOpenAddModal = (date = null) => {
     setTxModal({
       isOpen: true,
@@ -160,7 +177,6 @@ export default function App() {
     })
   }
 
-  // Open Edit modal
   const handleEditTransaction = (tx) => {
     setTxModal({
       isOpen: true,
@@ -171,7 +187,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col selection:bg-indigo-500 selection:text-white">
-      {/* Top Header */}
       <Header
         currentMonth={currentMonth}
         setCurrentMonth={setCurrentMonth}
@@ -181,12 +196,13 @@ export default function App() {
         onExportJSON={handleExportJSON}
         onOpenImportModal={() => setIsImportModalOpen(true)}
         onResetData={handleResetData}
+        currentUser={currentUser}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onLogout={handleLogout}
       />
 
-      {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         
-        {/* LUỒNG CHÍNH 1: Tiến trình 3 bước cốt lõi */}
         <WorkflowSteps
           currentMonth={currentMonth}
           monthlyBudget={currentBudget}
@@ -198,7 +214,6 @@ export default function App() {
           onOpenAddModal={() => handleOpenAddModal()}
         />
 
-        {/* LUỒNG CHÍNH 2: Thanh điều hướng Tab trực quan */}
         <div className="flex items-center justify-between border-b border-slate-200 mb-6 pb-2 overflow-x-auto">
           <div className="flex items-center space-x-2">
             <button
@@ -238,7 +253,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Quick empty month reminder button */}
           {monthTransactions.length > 0 && (
             <button
               onClick={() => {
@@ -255,10 +269,8 @@ export default function App() {
           )}
         </div>
 
-        {/* ===================== TAB 1: THEO DÕI & LỊCH HÀNG NGÀY ===================== */}
         {activeTab === 'daily' && (
           <div className="space-y-6 animate-fade-in">
-            {/* 1. Form Nhập Nhanh Hôm Nay / Ngày đang chọn (3 giây 1 chạm) */}
             <TodayQuickAdd
               onAddTransaction={handleSaveTransaction}
               todayExpense={todayExpense}
@@ -267,7 +279,6 @@ export default function App() {
               onResetToToday={() => setSelectedDate(todayStr)}
             />
 
-            {/* 2. Chi tiết & Nhật ký của ngày đang click chọn trên lịch */}
             <DayDetailInspector
               selectedDate={selectedDate}
               transactions={monthTransactions}
@@ -278,7 +289,6 @@ export default function App() {
               onClearSelectedDate={() => setSelectedDate(null)}
             />
 
-            {/* 3. Lịch Chi Tiêu 31 Ngày */}
             <DailyCalendarView
               currentMonth={currentMonth}
               transactions={monthTransactions}
@@ -290,10 +300,8 @@ export default function App() {
           </div>
         )}
 
-        {/* ===================== TAB 2: BIỂU ĐỒ & BÁO CÁO THÁNG ===================== */}
         {activeTab === 'analytics' && (
           <div className="space-y-6 animate-fade-in">
-            {/* Tóm tắt ngân sách & tiến độ tiêu */}
             <BudgetSummary
               currentMonth={currentMonth}
               transactions={monthTransactions}
@@ -301,7 +309,6 @@ export default function App() {
               onOpenBudgetModal={() => setIsBudgetModalOpen(true)}
             />
 
-            {/* Biểu đồ chi tiêu theo ngày & cơ cấu danh mục */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <DailySpendingChart
                 currentMonth={currentMonth}
@@ -320,7 +327,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ===================== TAB 3: SỔ GIAO DỊCH ===================== */}
         {activeTab === 'all_tx' && (
           <div className="space-y-6 animate-fade-in">
             <TransactionList
@@ -338,7 +344,6 @@ export default function App() {
 
       </main>
 
-      {/* Floating Action Button */}
       <button
         onClick={() => handleOpenAddModal()}
         className="fixed bottom-6 right-6 z-40 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full p-4 shadow-xl hover:shadow-2xl transition transform hover:scale-105 active:scale-95 flex items-center gap-2 group"
@@ -348,7 +353,6 @@ export default function App() {
         <span className="hidden sm:inline-block font-semibold text-sm pr-1">Thêm giao dịch</span>
       </button>
 
-      {/* Toast Notification */}
       {toast && (
         <div className="fixed bottom-6 left-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 animate-fade-in border border-slate-700 text-sm">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -356,7 +360,13 @@ export default function App() {
         </div>
       )}
 
-      {/* Modals */}
+      {/* Auth Modal for Login / Register */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
+      />
+
       <TransactionModal
         isOpen={txModal.isOpen}
         onClose={() => setTxModal({ isOpen: false, initialData: null, defaultDate: null })}
@@ -379,7 +389,6 @@ export default function App() {
         onImportSuccess={handleImportSuccess}
       />
 
-      {/* Footer */}
       <footer className="border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-400 mt-12">
         <p>Sổ Quản Lý Chi Tiêu Cá Nhân Hàng Ngày • Dữ liệu lưu an toàn trên máy của bạn</p>
       </footer>

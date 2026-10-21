@@ -1,8 +1,13 @@
 import { formatDateKey, getMonthKey } from './formatters'
 import { DEFAULT_BUDGET } from '../constants'
 
-const TRANSACTIONS_KEY = 'quanlychitieu_transactions_v3'
-const BUDGETS_KEY = 'quanlychitieu_budgets_v3'
+function getTxKey(userId) {
+  return userId ? `quanlychitieu_tx_${userId}_v1` : 'quanlychitieu_transactions_v3'
+}
+
+function getBudgetKey(userId) {
+  return userId ? `quanlychitieu_budgets_${userId}_v1` : 'quanlychitieu_budgets_v3'
+}
 
 /**
  * Empty by default as requested: clean slate for user to enter their own data
@@ -12,19 +17,26 @@ export function generateInitialSampleData() {
 }
 
 /**
- * Load all transactions from localStorage (defaults to empty [])
+ * Load all transactions from localStorage for a specific user
  */
-export function loadTransactions() {
+export function loadTransactions(userId = null) {
   try {
-    // Clear out old v1 cache if exists to guarantee empty month 10
-    if (localStorage.getItem('quanlychitieu_transactions_v1')) {
-      localStorage.removeItem('quanlychitieu_transactions_v1')
-    }
-    const raw = localStorage.getItem(TRANSACTIONS_KEY)
+    if (typeof window === 'undefined' || !window.localStorage) return []
+    const key = getTxKey(userId)
+    const raw = localStorage.getItem(key)
     if (!raw) {
-      const initial = []
-      saveTransactions(initial)
-      return initial
+      // If user-specific key is empty but global transactions exist, migrate them
+      if (userId) {
+        const oldGlobal = localStorage.getItem('quanlychitieu_transactions_v3')
+        if (oldGlobal) {
+          const parsed = JSON.parse(oldGlobal)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            saveTransactions(parsed, userId)
+            return parsed
+          }
+        }
+      }
+      return []
     }
     return JSON.parse(raw)
   } catch (err) {
@@ -34,31 +46,35 @@ export function loadTransactions() {
 }
 
 /**
- * Save all transactions to localStorage
+ * Save all transactions to localStorage for a specific user
  */
-export function saveTransactions(transactions) {
+export function saveTransactions(transactions, userId = null) {
   try {
-    localStorage.setItem(TRANSACTIONS_KEY, JSON.stringify(transactions))
+    if (typeof window === 'undefined' || !window.localStorage) return
+    const key = getTxKey(userId)
+    localStorage.setItem(key, JSON.stringify(transactions))
   } catch (err) {
     console.error('Error saving transactions to localStorage:', err)
   }
 }
 
 /**
- * Load budgets map: { "YYYY-MM": { monthlyLimit: number, alertThresholdPercent: number } }
+ * Load budgets map for a specific user
  */
-export function loadBudgets() {
+export function loadBudgets(userId = null) {
   try {
-    const raw = localStorage.getItem(BUDGETS_KEY)
+    if (typeof window === 'undefined' || !window.localStorage) return {}
+    const key = getBudgetKey(userId)
+    const raw = localStorage.getItem(key)
     if (!raw) {
       const currentMonthKey = getMonthKey()
       const initial = {
         [currentMonthKey]: {
-          monthlyLimit: 10000000, // 10 triệu mặc định cho tháng
+          monthlyLimit: 10000000,
           alertThresholdPercent: 85
         }
       }
-      saveBudgets(initial)
+      saveBudgets(initial, userId)
       return initial
     }
     return JSON.parse(raw)
@@ -69,24 +85,26 @@ export function loadBudgets() {
 }
 
 /**
- * Save budgets map to localStorage
+ * Save budgets map for a specific user
  */
-export function saveBudgets(budgets) {
+export function saveBudgets(budgets, userId = null) {
   try {
-    localStorage.setItem(BUDGETS_KEY, JSON.stringify(budgets))
+    if (typeof window === 'undefined' || !window.localStorage) return
+    const key = getBudgetKey(userId)
+    localStorage.setItem(key, JSON.stringify(budgets))
   } catch (err) {
     console.error('Error saving budgets to localStorage:', err)
   }
 }
 
 /**
- * Clear all transactions for a specific month
+ * Clear all transactions for a specific month for a user
  */
-export function clearMonthTransactions(monthKey) {
+export function clearMonthTransactions(monthKey, userId = null) {
   try {
-    const all = loadTransactions()
+    const all = loadTransactions(userId)
     const remaining = all.filter(t => !t.date || !t.date.startsWith(monthKey))
-    saveTransactions(remaining)
+    saveTransactions(remaining, userId)
     return remaining
   } catch (err) {
     console.error('Error clearing month transactions:', err)
