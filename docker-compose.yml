@@ -1,0 +1,9 @@
+services:
+  quan-ly-chi-tieu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: quan-ly-chi-tieu
+    ports:
+      - "3000:80"
+    restart: unless-stopped
